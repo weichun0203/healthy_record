@@ -17,8 +17,8 @@
     <style>
         body { font-family: 'Segoe UI', Microsoft JhengHei, sans-serif; background-color: #f0fdfa; }
         .input-group { margin-bottom: 1rem; }
-        .input-label { display: block; font-weight: 600; color: #374151; margin-bottom: 0.25rem; }
-        .input-field { width: 100%; padding: 0.75rem; border-radius: 0.5rem; border: 1px solid #d1d5db; outline: none; transition: border-color 0.2s; }
+        .input-label { display: block; font-weight: 600; color: #374151; margin-bottom: 0.25rem; font-size: 0.9rem; }
+        .input-field { width: 100%; padding: 0.6rem; border-radius: 0.5rem; border: 1px solid #d1d5db; outline: none; transition: border-color 0.2s; font-size: 0.95rem; }
         .input-field:focus { border-color: #14b8a6; ring: 2px solid #99f6e4; }
         .btn-primary { background-color: #0d9488; color: white; padding: 0.75rem; border-radius: 0.5rem; width: 100%; font-weight: bold; transition: background 0.2s; }
         .btn-primary:hover { background-color: #0f766e; }
@@ -31,8 +31,6 @@
         
         /* 一般 Spinner */
         .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #0d9488; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 8px; }
-        
-        /* 標題列專用白色 Spinner */
         .spinner-white { border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid white; border-radius: 50%; width: 14px; height: 14px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 4px; }
 
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -40,6 +38,7 @@
         /* Badges */
         .badge-sugar { background-color: #fff7ed; color: #c2410c; border: 1px solid #fdba74; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.85rem; }
         .badge-bp { background-color: #eff6ff; color: #1d4ed8; border: 1px solid #93c5fd; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.85rem; }
+        .badge-tag { display: inline-block; padding: 1px 6px; border-radius: 6px; font-size: 0.75rem; font-weight: bold; margin-right: 6px; border: 1px solid transparent; }
         
         /* Fade In Animation */
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -53,9 +52,17 @@
         const { useState, useEffect, useMemo } = React;
 
         const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbyIt9ByhKeJ9IqNvLHMeLTHCZgYjT8JW2jE2Cjv708KJAItAG3gdxVK-ToWcZJgIhh7/exec";
+        const STORAGE_KEY_HISTORY = 'patient_tracker_history_v1';
+
+        // 選項定義
+        const OPTIONS = {
+            bowel: ['正常', '便秘', '腹瀉', '失禁', '灌腸', '無', '其他'],
+            appetite: ['正常', '佳', '差', '禁食', '其他'],
+            mood: ['平穩', '開心', '焦慮', '生氣', '憂鬱', '躁動', '其他']
+        };
 
         const App = () => {
-            const [view, setView] = useState('record'); // record, history, settings
+            const [view, setView] = useState('record'); 
             const [gasUrl, setGasUrl] = useState(localStorage.getItem('patient_tracker_url') || DEFAULT_API_URL);
             const [loading, setLoading] = useState(false);
             const [message, setMessage] = useState(null);
@@ -75,9 +82,12 @@
                 bpDiastolic: '',
                 bloodSugar: '',
                 medication: '',
-                diet: '',
-                bowel: '正常',
-                behavior: ''
+                bowelStatus: '',
+                bowelNotes: '',
+                appetite: '',
+                dietContent: '',
+                mood: '',
+                behaviorNotes: ''
             };
             const [formData, setFormData] = useState(initialFormState);
 
@@ -105,6 +115,18 @@
                 setFormData({ ...formData, [e.target.name]: e.target.value });
             };
 
+            // 導航到新增紀錄的處理函式 (重點修改)
+            const handleNavToRecord = () => {
+                // 如果目前不在 record 頁面，或者正處於編輯模式，才進行重置
+                // 這符合：「每次進去(切換過來)都清空」，但「如果是進去才填寫(已在頁面上)就不清空」
+                if (view !== 'record' || isEditing) {
+                    setIsEditing(false);
+                    setEditingUuid(null);
+                    setFormData(initialFormState); // 清空表單
+                    setView('record');
+                }
+            };
+
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 if (!gasUrl) {
@@ -116,10 +138,22 @@
                 setLoading(true);
                 try {
                     const action = isEditing ? 'update' : 'create';
+                    
+                    const formatPayloadField = (status, content) => {
+                        const statusPart = status ? `[${status}]` : '';
+                        return `${statusPart} ${content || ''}`.trim();
+                    };
+
                     const payload = {
                         action: action,
                         uuid: editingUuid,
-                        ...formData
+                        bpSystolic: formData.bpSystolic,
+                        bpDiastolic: formData.bpDiastolic,
+                        bloodSugar: formData.bloodSugar,
+                        medication: formData.medication,
+                        bowel: formatPayloadField(formData.bowelStatus, formData.bowelNotes),
+                        diet: formatPayloadField(formData.appetite, formData.dietContent),
+                        behavior: formatPayloadField(formData.mood, formData.behaviorNotes)
                     };
 
                     await fetch(gasUrl, {
@@ -137,8 +171,6 @@
                     if (isEditing) {
                         setView('history');
                         setTimeout(fetchHistory, 1500); 
-                    } else {
-                        // 新增後不跳轉，但清空表單
                     }
 
                 } catch (error) {
@@ -160,8 +192,9 @@
                 
                 setShowDeleteModal(false);
                 
-                const originalData = [...historyData];
-                setHistoryData(prev => prev.filter(item => item.uuid !== uuid));
+                const newData = historyData.filter(item => item.uuid !== uuid);
+                setHistoryData(newData);
+                localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(newData)); 
                 showMessage('success', '紀錄已刪除');
 
                 try {
@@ -173,24 +206,41 @@
                     });
                     
                     setTimeout(fetchHistory, 2500);
-
                 } catch (error) {
-                    setHistoryData(originalData);
-                    showMessage('error', '刪除失敗');
+                    showMessage('error', '刪除請求發送失敗，下次同步時修正');
                 } finally {
                     setDeleteTargetUuid(null);
                 }
             };
 
+            const parseField = (str, options) => {
+                if (!str) return { status: '', notes: '' };
+                const match = str.match(/^\[(.*?)\]\s*(.*)/);
+                if (match) {
+                    return { status: match[1], notes: match[2] };
+                }
+                if (options.includes(str)) {
+                    return { status: str, notes: '' };
+                }
+                return { status: '', notes: str };
+            };
+
             const handleEditClick = (item) => {
+                const bowel = parseField(item.bowel, OPTIONS.bowel);
+                const diet = parseField(item.diet, OPTIONS.appetite);
+                const behavior = parseField(item.behavior, OPTIONS.mood);
+
                 setFormData({
                     bpSystolic: item.bpSystolic,
                     bpDiastolic: item.bpDiastolic,
                     bloodSugar: item.bloodSugar,
                     medication: item.medication,
-                    diet: item.diet,
-                    bowel: item.bowel,
-                    behavior: item.behavior
+                    bowelStatus: bowel.status,
+                    bowelNotes: bowel.notes,
+                    appetite: diet.status,
+                    dietContent: diet.notes,
+                    mood: behavior.status,
+                    behaviorNotes: behavior.notes
                 });
                 setEditingUuid(item.uuid);
                 setIsEditing(true);
@@ -206,14 +256,35 @@
 
             const fetchHistory = async () => {
                 if (!gasUrl) return;
-                setLoading(true);
+
+                const cached = localStorage.getItem(STORAGE_KEY_HISTORY);
+                if (cached) {
+                    try {
+                        const parsedData = JSON.parse(cached);
+                        if (Array.isArray(parsedData) && parsedData.length > 0) {
+                            setHistoryData(parsedData);
+                        }
+                    } catch (e) {
+                        console.error('快取讀取失敗', e);
+                    }
+                }
+
+                setLoading(true); 
                 try {
                     const response = await fetch(gasUrl);
                     const result = await response.json();
-                    setHistoryData(result.data || []);
+                    const freshData = result.data || [];
+                    
+                    setHistoryData(freshData);
+                    localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(freshData));
+                    
                 } catch (error) {
                     console.error(error);
-                    showMessage('error', '讀取失敗，請檢查權限設定');
+                    if (cached) {
+                        showMessage('error', '同步失敗，目前顯示本地存檔');
+                    } else {
+                        showMessage('error', '讀取失敗，請檢查權限');
+                    }
                 } finally {
                     setLoading(false);
                 }
@@ -228,20 +299,13 @@
             const formatDateTitle = (dateStr) => {
                 if (!dateStr) return '';
                 const parts = dateStr.split('/');
-                if (parts.length >= 3) {
-                    return `${parts[1]}/${parts[2]}`; 
-                }
+                if (parts.length >= 3) return `${parts[1]}/${parts[2]}`;
                 const dashParts = dateStr.split('-');
-                if (dashParts.length >= 3) {
-                     return `${dashParts[1]}/${dashParts[2]}`; 
-                }
+                if (dashParts.length >= 3) return `${dashParts[1]}/${dashParts[2]}`;
                 return dateStr;
             };
 
-            const formatTime = (timeStr) => {
-                if (!timeStr) return '';
-                return timeStr;
-            };
+            const formatTime = (timeStr) => timeStr || '';
 
             const groupedHistory = useMemo(() => {
                 const groups = [];
@@ -257,6 +321,26 @@
                 return groups;
             }, [historyData]);
 
+            const RenderField = ({ text, colorClass }) => {
+                if (!text) return null;
+                const match = text.match(/^\[(.*?)\]\s*(.*)/);
+                if (match) {
+                    const status = match[1];
+                    const content = match[2];
+                    const isNormal = ['正常', '平穩', '佳'].includes(status);
+                    
+                    return (
+                        <div>
+                            <span className={`badge-tag ${isNormal ? 'bg-gray-100 text-gray-600' : colorClass}`}>
+                                {status}
+                            </span>
+                            <span className="text-gray-800 font-medium break-words">{content}</span>
+                        </div>
+                    );
+                }
+                return <span className="font-medium text-gray-800 break-words">{text}</span>;
+            };
+
             return (
                 <div className="max-w-md mx-auto min-h-screen pb-24 relative">
                     {/* Header */}
@@ -267,11 +351,10 @@
                                 {isEditing ? '編輯紀錄' : '病人照護日誌'}
                             </h1>
                             <div className="flex items-center gap-2">
-                                {/* 讀取指示器 (移動到這裡) */}
                                 {loading && (
                                     <div className="flex items-center text-xs text-teal-100 bg-teal-700 bg-opacity-50 px-3 py-1 rounded-full animate-fade-in transition-all">
                                         <span className="spinner-white"></span>
-                                        讀取中...
+                                        同步中...
                                     </div>
                                 )}
                                 <button onClick={() => setView('settings')} className="p-2 hover:bg-teal-700 rounded-full">
@@ -281,14 +364,13 @@
                         </div>
                     </header>
 
-                    {/* Notification */}
+                    {/* Notification & Modals */}
                     {message && (
                         <div className={`p-3 m-4 rounded-lg text-sm font-bold text-center fixed top-16 left-0 right-0 z-50 shadow-lg mx-4 animate-fade-in ${message.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                             {message.text}
                         </div>
                     )}
 
-                    {/* Delete Modal */}
                     {showDeleteModal && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 animate-fade-in">
                             <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm">
@@ -323,25 +405,11 @@
                             <div className="card card-body animate-fade-in">
                                 <h2 className="text-lg font-bold mb-4 text-gray-800">系統設定</h2>
                                 <p className="text-sm text-gray-500 mb-2">資料庫 API (已內建)</p>
-                                <input 
-                                    type="text" 
-                                    value={gasUrl}
-                                    onChange={(e) => setGasUrl(e.target.value)}
-                                    className="input-field mb-4 text-sm bg-gray-50 text-gray-500"
-                                    readOnly
-                                />
-                                <a 
-                                    href="https://docs.google.com/spreadsheets/d/1GFWKZ9A0-MRfh94rdh2BQ7EUO2ZKrS0P0bMc-HcimVg/edit?usp=sharing"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center justify-center w-full py-3 px-4 mb-4 bg-teal-50 border border-teal-200 text-teal-700 rounded-lg font-bold hover:bg-teal-100 transition-colors"
-                                >
-                                    <i data-lucide="database" className="w-5 h-5 mr-2"></i>
-                                    查看資料庫 (Google Sheet)
+                                <input type="text" value={gasUrl} onChange={(e) => setGasUrl(e.target.value)} className="input-field mb-4 text-sm bg-gray-50 text-gray-500" readOnly />
+                                <a href="https://docs.google.com/spreadsheets/d/1GFWKZ9A0-MRfh94rdh2BQ7EUO2ZKrS0P0bMc-HcimVg/edit?usp=sharing" target="_blank" rel="noopener noreferrer" className="flex items-center justify-center w-full py-3 px-4 mb-4 bg-teal-50 border border-teal-200 text-teal-700 rounded-lg font-bold hover:bg-teal-100 transition-colors">
+                                    <i data-lucide="database" className="w-5 h-5 mr-2"></i> 查看資料庫 (Google Sheet)
                                 </a>
-                                <button onClick={() => setView('record')} className="btn-primary mb-4">
-                                    回到紀錄頁面
-                                </button>
+                                <button onClick={handleNavToRecord} className="btn-primary mb-4">回到紀錄頁面</button>
                             </div>
                         )}
 
@@ -376,31 +444,63 @@
                                 </div>
 
                                 {/* 護理紀錄 */}
-                                <div className="card card-body">
+                                <div className="card card-body space-y-4">
                                     <h3 className="font-bold text-teal-700 mb-3 border-b pb-2 flex items-center gap-2">
                                         <i data-lucide="clipboard-list" className="w-4 h-4"></i> 護理紀錄
                                     </h3>
-                                    <div className="input-group">
+
+                                    {/* 排便狀況：下拉 + 備註 */}
+                                    <div>
                                         <label className="input-label">排便狀況</label>
-                                        <select name="bowel" value={formData.bowel} onChange={handleChange} className="input-field bg-white">
-                                            <option value="正常">正常</option>
-                                            <option value="便秘">便秘 (無排便)</option>
-                                            <option value="腹瀉">腹瀉</option>
-                                            <option value="失禁">失禁</option>
-                                            <option value="有灌腸">有灌腸</option>
-                                        </select>
+                                        <div className="flex gap-2">
+                                            <select name="bowelStatus" value={formData.bowelStatus} onChange={handleChange} className="input-field w-1/3 bg-white">
+                                                <option value="" disabled>請選擇</option>
+                                                {OPTIONS.bowel.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                            </select>
+                                            <input type="text" name="bowelNotes" value={formData.bowelNotes} onChange={handleChange} className="input-field w-2/3" placeholder="備註 (顏色/量)..." />
+                                        </div>
                                     </div>
-                                    <div className="input-group">
+
+                                    {/* 飲食內容：食慾(下拉) + 內容(多行) */}
+                                    <div>
+                                        <label className="input-label">飲食紀錄</label>
+                                        <div className="flex gap-2 items-start">
+                                            <div className="w-1/3">
+                                                <span className="text-xs text-gray-500 mb-1 block">食慾</span>
+                                                <select name="appetite" value={formData.appetite} onChange={handleChange} className="input-field bg-white">
+                                                    <option value="" disabled>請選擇</option>
+                                                    {OPTIONS.appetite.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="w-2/3">
+                                                <span className="text-xs text-gray-500 mb-1 block">內容/備註</span>
+                                                <input type="text" name="dietContent" value={formData.dietContent} onChange={handleChange} className="input-field" placeholder="吃了什麼..." />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 行為情緒：情緒(下拉) + 觀察(多行) */}
+                                    <div>
+                                        <label className="input-label">行為/情緒</label>
+                                        <div className="flex gap-2 items-start">
+                                            <div className="w-1/3">
+                                                <span className="text-xs text-gray-500 mb-1 block">情緒</span>
+                                                <select name="mood" value={formData.mood} onChange={handleChange} className="input-field bg-white">
+                                                    <option value="" disabled>請選擇</option>
+                                                    {OPTIONS.mood.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="w-2/3">
+                                                <span className="text-xs text-gray-500 mb-1 block">觀察紀錄</span>
+                                                <input type="text" name="behaviorNotes" value={formData.behaviorNotes} onChange={handleChange} className="input-field" placeholder="睡眠狀況/行為..." />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 服藥紀錄 */}
+                                    <div className="input-group pt-2 border-t border-gray-100">
                                         <label className="input-label">服藥紀錄</label>
                                         <textarea name="medication" value={formData.medication} onChange={handleChange} rows="2" className="input-field" placeholder="藥名與時間..."></textarea>
-                                    </div>
-                                    <div className="input-group">
-                                        <label className="input-label">飲食內容</label>
-                                        <textarea name="diet" value={formData.diet} onChange={handleChange} rows="2" className="input-field" placeholder="吃了什麼..."></textarea>
-                                    </div>
-                                    <div className="input-group">
-                                        <label className="input-label">行為/情緒</label>
-                                        <textarea name="behavior" value={formData.behavior} onChange={handleChange} rows="2" className="input-field" placeholder="紀錄觀察..."></textarea>
                                     </div>
                                 </div>
 
@@ -408,93 +508,72 @@
                                     {loading ? <span><span className="spinner"></span>處理中...</span> : (isEditing ? '更新紀錄' : '提交紀錄')}
                                 </button>
                                 {isEditing && (
-                                    <button type="button" onClick={handleCancelEdit} className="btn-secondary w-full mt-2">
-                                        取消編輯
-                                    </button>
+                                    <button type="button" onClick={handleCancelEdit} className="btn-secondary w-full mt-2">取消編輯</button>
                                 )}
                             </form>
                         )}
 
                         {view === 'history' && (
                             <div className="space-y-6">
-                                {/* 移除這裡的 loading 顯示 */}
-                                
-                                {!loading && groupedHistory.length === 0 && (
-                                    <div className="text-center text-gray-500 mt-10">尚無紀錄</div>
-                                )}
+                                {!loading && groupedHistory.length === 0 && <div className="text-center text-gray-500 mt-10">尚無紀錄</div>}
 
                                 {groupedHistory.map((group, groupIndex) => (
                                     <div key={groupIndex} className="card border-l-4 border-teal-500 animate-fade-in">
-                                        
                                         <div className="card-header flex justify-between items-center">
                                             <div className="flex items-center gap-2">
                                                 <i data-lucide="calendar" className="w-5 h-5 text-teal-600"></i>
-                                                <span className="text-xl font-bold text-gray-800 tracking-wide">
-                                                    {formatDateTitle(group.date)}
-                                                </span>
+                                                <span className="text-xl font-bold text-gray-800 tracking-wide">{formatDateTitle(group.date)}</span>
                                             </div>
-                                            <span className="text-xs bg-teal-100 text-teal-700 px-2 py-1 rounded-full font-medium">
-                                                {group.items.length} 筆資料
-                                            </span>
+                                            <span className="text-xs bg-teal-100 text-teal-700 px-2 py-1 rounded-full font-medium">{group.items.length} 筆資料</span>
                                         </div>
 
                                         <div className="card-body bg-white space-y-6">
                                             {group.items.map((item, itemIndex) => (
                                                 <div key={item.uuid || itemIndex} className={`relative ${itemIndex !== group.items.length - 1 ? 'border-b border-gray-100 pb-6' : ''}`}>
                                                     
+                                                    {/* 數值區 */}
                                                     <div className="flex flex-wrap justify-between items-start mb-3 gap-2">
                                                         <span className="text-sm font-bold text-teal-700 bg-teal-50 px-2 py-1 rounded flex items-center gap-1">
-                                                            <i data-lucide="clock" className="w-3 h-3"></i>
-                                                            {formatTime(item.time)}
+                                                            <i data-lucide="clock" className="w-3 h-3"></i> {formatTime(item.time)}
                                                         </span>
-
                                                         <div className="flex flex-wrap gap-2 justify-end">
                                                             {(item.bpSystolic || item.bpDiastolic) && (
-                                                                <span className="badge-bp flex items-center gap-1">
-                                                                    <i data-lucide="heart-pulse" className="w-3 h-3"></i>
-                                                                    血壓: {item.bpSystolic}/{item.bpDiastolic}
-                                                                </span>
+                                                                <span className="badge-bp flex items-center gap-1"><i data-lucide="heart-pulse" className="w-3 h-3"></i> 血壓: {item.bpSystolic}/{item.bpDiastolic}</span>
                                                             )}
                                                             {item.bloodSugar && (
-                                                                <span className="badge-sugar flex items-center gap-1">
-                                                                    <i data-lucide="droplet" className="w-3 h-3"></i>
-                                                                    血糖: {item.bloodSugar}
-                                                                </span>
-                                                            )}
-                                                            {item.bowel && item.bowel !== '正常' && (
-                                                                <span className="bg-purple-100 text-purple-700 border border-purple-200 px-2 py-1 rounded-full text-xs font-bold">
-                                                                    {item.bowel}
-                                                                </span>
+                                                                <span className="badge-sugar flex items-center gap-1"><i data-lucide="droplet" className="w-3 h-3"></i> 血糖: {item.bloodSugar}</span>
                                                             )}
                                                         </div>
                                                     </div>
 
+                                                    {/* 內容區 */}
                                                     <div className="space-y-2 text-sm text-gray-700 pl-1">
-                                                        {item.medication && (
-                                                            <div className="flex flex-col bg-slate-50 p-2 rounded border border-slate-100">
-                                                                <span className="text-xs font-bold text-slate-500 mb-1 flex items-center gap-1 uppercase">
-                                                                    <i data-lucide="pill" className="w-3 h-3"></i>
-                                                                    服藥紀錄
-                                                                </span>
-                                                                <span className="font-medium text-gray-800 break-words">{item.medication}</span>
+                                                        
+                                                        {item.bowel && (
+                                                             <div className="flex flex-col bg-purple-50 p-2 rounded border border-purple-100">
+                                                                <span className="text-xs font-bold text-purple-600 mb-1 flex items-center gap-1 uppercase"><i data-lucide="check-circle-2" className="w-3 h-3"></i> 排便狀況</span>
+                                                                <RenderField text={item.bowel} colorClass="bg-purple-200 text-purple-800" />
                                                             </div>
                                                         )}
+
                                                         {item.diet && (
                                                             <div className="flex flex-col bg-orange-50 p-2 rounded border border-orange-100">
-                                                                <span className="text-xs font-bold text-orange-500 mb-1 flex items-center gap-1 uppercase">
-                                                                    <i data-lucide="utensils" className="w-3 h-3"></i>
-                                                                    飲食內容
-                                                                </span>
-                                                                <span className="font-medium text-gray-800 break-words">{item.diet}</span>
+                                                                <span className="text-xs font-bold text-orange-500 mb-1 flex items-center gap-1 uppercase"><i data-lucide="utensils" className="w-3 h-3"></i> 飲食紀錄</span>
+                                                                <RenderField text={item.diet} colorClass="bg-orange-200 text-orange-800" />
                                                             </div>
                                                         )}
+                                                        
                                                         {item.behavior && (
-                                                            <div className="flex flex-col bg-purple-50 p-2 rounded border border-purple-100">
-                                                                <span className="text-xs font-bold text-purple-600 mb-1 flex items-center gap-1 uppercase">
-                                                                    <i data-lucide="brain-circuit" className="w-3 h-3"></i>
-                                                                    行為/情緒
-                                                                </span>
-                                                                <span className="text-gray-700 italic">"{item.behavior}"</span>
+                                                            <div className="flex flex-col bg-blue-50 p-2 rounded border border-blue-100">
+                                                                <span className="text-xs font-bold text-blue-600 mb-1 flex items-center gap-1 uppercase"><i data-lucide="brain-circuit" className="w-3 h-3"></i> 行為/情緒</span>
+                                                                <RenderField text={item.behavior} colorClass="bg-blue-200 text-blue-800" />
+                                                            </div>
+                                                        )}
+
+                                                        {item.medication && (
+                                                            <div className="flex flex-col bg-slate-50 p-2 rounded border border-slate-100">
+                                                                <span className="text-xs font-bold text-slate-500 mb-1 flex items-center gap-1 uppercase"><i data-lucide="pill" className="w-3 h-3"></i> 服藥紀錄</span>
+                                                                <span className="font-medium text-gray-800 break-words">{item.medication}</span>
                                                             </div>
                                                         )}
                                                     </div>
@@ -502,12 +581,8 @@
                                                     <div className="mt-3 flex justify-end gap-2">
                                                         {item.uuid && (
                                                             <>
-                                                            <button onClick={() => handleEditClick(item)} className="px-2 py-1 text-xs bg-white border border-teal-500 text-teal-600 rounded hover:bg-teal-50 flex items-center gap-1 transition-colors">
-                                                                <i data-lucide="edit-2" className="w-3 h-3"></i> 編輯
-                                                            </button>
-                                                            <button onClick={() => handleDeleteClick(item.uuid)} className="px-2 py-1 text-xs bg-white border border-red-300 text-red-500 rounded hover:bg-red-50 flex items-center gap-1 transition-colors">
-                                                                <i data-lucide="trash-2" className="w-3 h-3"></i> 刪除
-                                                            </button>
+                                                                <button onClick={() => handleEditClick(item)} className="px-2 py-1 text-xs bg-white border border-teal-500 text-teal-600 rounded hover:bg-teal-50 flex items-center gap-1 transition-colors"><i data-lucide="edit-2" className="w-3 h-3"></i> 編輯</button>
+                                                                <button onClick={() => handleDeleteClick(item.uuid)} className="px-2 py-1 text-xs bg-white border border-red-300 text-red-500 rounded hover:bg-red-50 flex items-center gap-1 transition-colors"><i data-lucide="trash-2" className="w-3 h-3"></i> 刪除</button>
                                                             </>
                                                         )}
                                                     </div>
@@ -522,7 +597,7 @@
 
                     {/* Bottom Navigation */}
                     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around p-2 pb-4 shadow-lg z-30 max-w-md mx-auto">
-                        <div onClick={() => { setIsEditing(false); setView('record'); }} className={`nav-item flex flex-col items-center ${view === 'record' ? 'active' : 'text-gray-500'}`}>
+                        <div onClick={handleNavToRecord} className={`nav-item flex flex-col items-center ${view === 'record' ? 'active' : 'text-gray-500'}`}>
                             <i data-lucide="plus-circle" className="w-6 h-6 mb-1"></i>
                             <span className="text-xs">新增紀錄</span>
                         </div>
